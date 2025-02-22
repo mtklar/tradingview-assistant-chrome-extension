@@ -4,6 +4,7 @@ const tv = {
   tickerTextPrev: null,
   timeFrameTextPrev: null,
   isReportChanged: false,
+  _settingsMethod: null,
 };
 
 const SUPPORT_TEXT =
@@ -55,98 +56,32 @@ tv.getStrategy = async (
   isDeepTest = false,
 ) => {
   let indicatorName = null;
-  if (strategyName !== null) {
-    if (!strategyName) {
-      await tv.openStrategyTab(isDeepTest);
-      let strategyCaptionEl = document.querySelector(SEL.strategyCaption);
-      if (!strategyCaptionEl || !strategyCaptionEl.innerText) {
-        throw new Error(
-          'There is not strategy name element on "Strategy tester" tab.' +
-            SUPPORT_TEXT,
-        );
-      }
-      indicatorName = strategyCaptionEl.innerText;
-
-      let stratParamEl = document.querySelector(SEL.strategyDialogParam);
-      if (!stratParamEl) {
-        throw new Error(
-          'There is not strategy param button on the "Strategy tester" tab.' +
-            SUPPORT_TEXT,
-        );
-      }
-      page.mouseClick(stratParamEl);
-      const dialogTitle = await page.waitForSelector(SEL.indicatorTitle, 7500);
-      if (!dialogTitle || !dialogTitle.innerText) {
-        if (document.querySelector(SEL.cancelBtn))
-          document.querySelector(SEL.cancelBtn).click();
-        throw new Error(
-          "The strategy parameter windows is not opened." + SUPPORT_TEXT,
-        );
-      }
-
-      let isStrategyPropertiesTab = document.querySelector(SEL.tabProperties); // For strategy only
-      if (isIndicatorSave || isStrategyPropertiesTab) {
-        indicatorName = dialogTitle.innerText;
-      }
-    } else {
-      const indicatorLegendsEl = document.querySelectorAll(
-        SEL.tvLegendIndicatorItem,
-      );
-      if (!indicatorLegendsEl) return null;
-      for (let indicatorItemEl of indicatorLegendsEl) {
-        const indicatorTitleEl = indicatorItemEl.querySelector(
-          SEL.tvLegendIndicatorItemTitle,
-        );
-        if (!indicatorTitleEl) continue;
-        if (strategyName && strategyName !== indicatorTitleEl.innerText)
-          continue;
-
-        page.mouseClick(indicatorTitleEl);
-        page.mouseClick(indicatorTitleEl);
-        const dialogTitle = await page.waitForSelector(
-          SEL.indicatorTitle,
-          2500,
-        );
-        if (!dialogTitle || !dialogTitle.innerText) {
-          if (document.querySelector(SEL.cancelBtn))
-            document.querySelector(SEL.cancelBtn).click();
-          continue;
-        }
-        let isStrategyPropertiesTab = document.querySelector(SEL.tabProperties); // For strategy only
-        if (isIndicatorSave || isStrategyPropertiesTab) {
-          indicatorName = dialogTitle.innerText;
-          break;
-        }
-      }
-    }
-  } else {
-    let dialogTitleEl = await page.waitForSelector(SEL.indicatorTitle, 2500);
-    if (!dialogTitleEl || !dialogTitleEl.innerText) {
-      await page.mouseClickSelector(SEL.cancelBtn);
-      await tv.openStrategyTab(isDeepTest);
-      await tv.openCurrentStrategyParam();
-      dialogTitleEl = await page.$(SEL.indicatorTitle);
-    }
-    let isStrategyPropertiesTab = document.querySelector(SEL.tabProperties); // For strategy only
-    if (isIndicatorSave || isStrategyPropertiesTab) {
-      indicatorName = dialogTitleEl.innerText;
-    }
+  try {
+    await tv.openStrategyTab(isDeepTest);
+  } catch (err) {
+    console.warn("checkAndOpenStrategy error", err);
   }
-  if (indicatorName === null)
+  let isOpened = false;
+  if (strategyName)
+    isOpened = await tv.openStrategyParameters(strategyName, true);
+  else isOpened = await tv.openStrategyParameters(null, false);
+  if (!isOpened) {
+    throw new Error(
+      "It was not possible open strategy. Add it to the chart and try again.",
+    );
+  }
+
+  const dialogTitle = await page.waitForSelector(SEL.indicatorTitle);
+  if (!dialogTitle || dialogTitle.innerText === null)
     throw new Error(
       "It was not possible to find a strategy with parameters among the indicators. Add it to the chart and try again.",
     );
-  // return strategyData
 
   if (!(await tv.changeDialogTabToInput()))
     throw new Error(
       `Can\'t activate input tab in strategy parameters` + SUPPORT_TEXT,
     );
-  // if(await tv.changeDialogTabToInput()) {
 
-  // } else {
-  //   console.error(`Can't set parameters tab to input`)
-  // }
   const strategyInputs = await tv.getStrategyParams(isIndicatorSave);
   const strategyData = { name: indicatorName, properties: strategyInputs };
 
@@ -263,55 +198,64 @@ tv.getStrategyParams = async (isIndicatorSave = false) => {
 tv.setStrategyParams = async (
   name,
   propVal,
+  isDeepTest = false,
   keepStrategyParamOpen = false,
-  isDeepTest,
 ) => {
-  // if (isCheckOpenedWindow) {
-  //   const indicatorTitleEl = document.querySelector(SEL.indicatorTitle)
-  //   if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
-  //     return null
-  //   }
-  // }
-  // else {
-  //   const indicatorTitleEl = await tv.checkAndOpenStrategy(name) // In test.name - ordinary strategy name but in strategyData.name short one as in indicator title
-  //   if (!indicatorTitleEl)
-  //     return null
-  // }
-
   const indicatorTitleEl = await tv.checkAndOpenStrategy(name, isDeepTest); // In test.name - ordinary strategy name but in strategyData.name short one as in indicator title
   if (!indicatorTitleEl) return null;
-  const indicProperties = document.querySelectorAll(SEL.indicatorProperty);
+  let popupVisibleHeight = 917;
+  try {
+    popupVisibleHeight =
+      page.$(SEL.indicatorScroll)?.getBoundingClientRect()?.bottom || 917;
+  } catch {}
+  let indicProperties = document.querySelectorAll(SEL.indicatorProperty);
   const propKeys = Object.keys(propVal);
   let setResultNumber = 0;
   let setPropertiesNames = {};
   for (let i = 0; i < indicProperties.length; i++) {
     const propText = indicProperties[i].innerText;
     if (propText && propKeys.includes(propText)) {
+      try {
+        const rect = indicProperties[i].getBoundingClientRect();
+        if (
+          rect.top < 0 ||
+          rect.bottom > popupVisibleHeight ||
+          !indicProperties[i].checkVisibility()
+        ) {
+          indicProperties[i].scrollIntoView(); // TODO scroll by hight and if not visible, than scroll Into - faster becouse for 5-10 elemetns at the time
+          await page.waitForTimeout(10);
+          if (
+            indicProperties[i].getBoundingClientRect()?.bottom >
+            popupVisibleHeight
+          )
+            await page.waitForTimeout(50);
+        }
+      } catch {}
       setPropertiesNames[propText] = true;
       setResultNumber++;
       const propClassName = indicProperties[i].getAttribute("class");
       if (propClassName.includes("first-")) {
         i++;
-        if (indicProperties[i].querySelector("input")) {
-          page.setInputElementValue(
-            indicProperties[i].querySelector("input"),
-            propVal[propText],
-          );
-        } else if (indicProperties[i].querySelector('span[role="button"]')) {
-          // List
-          const buttonEl = indicProperties[i].querySelector(
+        let inputEl = indicProperties[i].querySelector("input");
+        if (inputEl) {
+          page.setInputElementValue(inputEl, propVal[propText]);
+          inputEl = null;
+        } else {
+          let buttonEl = indicProperties[i].querySelector(
             'span[role="button"]',
           );
-          if (!buttonEl || !buttonEl.innerText) continue;
-          buttonEl.scrollIntoView();
-          await page.waitForTimeout(100);
-          page.mouseClick(buttonEl);
-          page.setSelByText(SEL.strategyListOptions, propVal[propText]);
+          if (buttonEl?.innerText) {
+            // DropDown List
+            buttonEl.click();
+            buttonEl = null;
+            await page.setSelByText(SEL.strategyListOptions, propVal[propText]);
+          }
         }
       } else if (propClassName.includes("fill-")) {
-        const checkboxEl = indicProperties[i].querySelector(
+        let checkboxEl = indicProperties[i].querySelector(
           'input[type="checkbox"]',
         );
+
         if (checkboxEl) {
           // const isChecked = checkboxEl.getAttribute('checked') !== null ? checkboxEl.checked : false
           const isChecked = Boolean(checkboxEl.checked);
@@ -319,15 +263,17 @@ tv.setStrategyParams = async (
             page.mouseClick(checkboxEl);
             checkboxEl.checked = Boolean(propVal[propText]);
           }
+          checkboxEl = null;
         }
       }
       setResultNumber = Object.keys(setPropertiesNames).length;
       if (propKeys.length === setResultNumber) break;
     }
   }
+  indicProperties = null;
   // TODO check if not equal propKeys.length === setResultNumber, because there is none of changes too. So calculation doesn't start
-  if (!keepStrategyParamOpen && document.querySelector(SEL.okBtn))
-    document.querySelector(SEL.okBtn).click();
+  const elOkBtn = page.$(SEL.okBtn);
+  if (!keepStrategyParamOpen && elOkBtn) elOkBtn.click();
   return true;
 };
 
@@ -342,22 +288,96 @@ tv.changeDialogTabToInput = async () => {
   }
   inputTabEl.click();
   isInputTabActive = await page.waitForSelector(SEL.tabInputActive, 2000);
-  return isInputTabActive ? true : false;
+  return !!isInputTabActive;
 };
 
-tv.openCurrentStrategyParam = async () => {
-  let stratParamEl = document.querySelector(SEL.strategyDialogParam);
-  if (!stratParamEl) {
+tv._openStrategyByButtonNearTitle = async () => {
+  if (tv._settingsMethod !== null && tv._settingsMethod !== "setButton")
+    return false;
+  const stratParamEl = page.$(SEL.strategyDialogParam); // Version before 2025.02.21 with param button near title
+  if (!stratParamEl) return false;
+  tv._settingsMethod = "setButton";
+  page.mouseClick(stratParamEl); // stratParamEl.click()
+  return true;
+};
+
+tv._openStrategyParamsByStrategyDoubleClickBy = async (indicatorTitle) => {
+  if (
+    (tv._settingsMethod !== null && tv._settingsMethod !== "indName") ||
+    !indicatorTitle
+  )
+    return false;
+  const indicatorLegendsEl = document.querySelectorAll(
+    SEL.tvLegendIndicatorItem,
+  );
+  if (!indicatorLegendsEl) return false;
+  for (let indicatorItemEl of indicatorLegendsEl) {
+    const indicatorTitleEl = indicatorItemEl.querySelector(
+      SEL.tvLegendIndicatorItemTitle,
+    );
+    if (!indicatorTitleEl) continue;
+    if (indicatorTitle !== indicatorTitleEl.innerText) continue;
+    page.mouseDoubleClick(indicatorTitleEl);
+    // page.mouseClick(indicatorTitleEl)
+    // page.mouseClick(indicatorTitleEl)
+    const dialogTitle = await page.waitForSelector(SEL.indicatorTitle, 2500);
+    if (dialogTitle && dialogTitle.innerText === indicatorTitle) {
+      tv._settingsMethod = "indName";
+      return true;
+    }
+    if (page.$(SEL.cancelBtn)) page.mouseClickSelector(SEL.cancelBtn); //.click()
+  }
+  return false;
+};
+
+tv._openStrategyParamsByStrategyMenu = async () => {
+  if (tv._settingsMethod !== null && tv._settingsMethod !== "setMenu")
+    return false;
+  const strategyCaptionEl = page.$(SEL.strategyCaption);
+  if (!strategyCaptionEl) return false;
+  page.mouseClick(strategyCaptionEl);
+  const menuItemSettingsEl = await page.waitForSelector(
+    SEL.strategyMenuItemSettings,
+  );
+  if (!menuItemSettingsEl) return false;
+  tv._settingsMethod = "setMenu";
+  page.mouseClick(menuItemSettingsEl);
+  return true;
+};
+
+tv.openStrategyParameters = async (
+  indicatorTitle,
+  searchAgainstStrategies = false,
+) => {
+  let isOpened = false;
+  if (indicatorTitle && searchAgainstStrategies) {
+    isOpened =
+      await tv._openStrategyParamsByStrategyDoubleClickBy(indicatorTitle);
+    tv._settingsMethod = null;
+  } else {
+    isOpened = await tv._openStrategyByButtonNearTitle();
+    if (!isOpened) isOpened = await tv._openStrategyParamsByStrategyMenu();
+    if (!isOpened) {
+      if (!indicatorTitle) {
+        const curStrategyCaptionEl = page.$(SEL.strategyCaption);
+        if (curStrategyCaptionEl)
+          indicatorTitle = curStrategyCaptionEl.innerText;
+      }
+      isOpened =
+        await tv._openStrategyParamsByStrategyDoubleClickBy(indicatorTitle);
+    }
+  }
+  if (!isOpened) {
     await ui.showErrorPopup(
       "There is not strategy param button on the strategy tab. Test stopped. Open correct page please",
     );
     return null;
   }
-  page.mouseClick(stratParamEl); // stratParamEl.click()
   const stratIndicatorEl = await page.waitForSelector(SEL.indicatorTitle, 2000);
   if (!stratIndicatorEl) {
     await ui.showErrorPopup(
-      "There is not strategy parameters. Test stopped. Open correct page please",
+      "There is not strategy parameters popup. If was not opened, probably TV UI changes. " +
+        "Reload page and try again. Test stopped. Open correct page please",
     );
     return null;
   }
@@ -447,7 +467,7 @@ tv.setDeepTest = async (isDeepTest, deepStartDate = null) => {
 };
 
 tv.checkAndOpenStrategy = async (name, isDeepTest = false) => {
-  let indicatorTitleEl = document.querySelector(SEL.indicatorTitle);
+  let indicatorTitleEl = page.$(SEL.indicatorTitle);
   if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
     try {
       await tv.openStrategyTab(isDeepTest);
@@ -455,19 +475,25 @@ tv.checkAndOpenStrategy = async (name, isDeepTest = false) => {
       console.warn("checkAndOpenStrategy error", err);
       return null;
     }
-    const isOpened = await tv.openCurrentStrategyParam();
+    const isOpened = await tv.openStrategyParameters(name);
     if (!isOpened) {
       console.warn("Can able to open current strategy parameters");
-      return null;
-    }
-    indicatorTitleEl = document.querySelector(SEL.indicatorTitle);
-    if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
       await ui.showErrorPopup(
-        `The ${name} strategy parameters could not opened. ${indicatorTitleEl.innerText ? 'Opened "' + indicatorTitleEl.innerText + '".' : ""} Reload the page, leave one strategy on the chart and try again.`,
+        "Can able to open current strategy parameters Reload the page, leave one strategy on the chart and try again.",
       );
       return null;
     }
+    if (name) {
+      indicatorTitleEl = page.$(SEL.indicatorTitle);
+      if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
+        await ui.showErrorPopup(
+          `The ${name} strategy parameters could not opened. ${indicatorTitleEl.innerText ? 'Opened "' + indicatorTitleEl.innerText + '".' : ""} Reload the page, leave one strategy on the chart and try again.`,
+        );
+        return null;
+      }
+    }
   }
+  await page.waitForSelector(SEL.indicatorProperty);
   return indicatorTitleEl;
 };
 
@@ -476,22 +502,7 @@ tv.checkIsNewVersion = async (timeout = 1000) => {
   if (typeof selStatus === "undefined" || selStatus.isNewVersion !== null)
     // Already checked
     return;
-  let element = await page.waitForSelector(
-    SEL.strategyDeepTestCheckbox,
-    timeout,
-  );
-  if (!element) {
-    selStatus.isNewVersion = true;
-    element = await page.waitForSelector(SEL.strategyDeepTestCheckbox, timeout);
-    if (element) {
-      // New version
-      console.log("[INFO] New TV UI by deep backtest switch");
-      return;
-    }
-    selStatus.isNewVersion = null;
-  }
-  // If user do not have deep history checkbox then per
-  element = await page.waitForSelector(SEL.strategyPerformanceTab, timeout);
+  let element = await page.waitForSelector(SEL.strategyPerformanceTab, timeout);
   if (element) {
     // Old versions
     selStatus.isNewVersion = false;
@@ -502,11 +513,11 @@ tv.checkIsNewVersion = async (timeout = 1000) => {
   element = await page.waitForSelector(SEL.strategyPerformanceTab, timeout);
   if (element) {
     // New versions
-    console.log("[INFO] New TV UI by by performance tab");
+    console.log("[INFO] New TV UI by performance tab");
     return;
   }
   console.warn(
-    "[WARN] Can able to detect current TV UI changes. Set it to new one",
+    "[WARN] Can able to detect current TV UI changes. Probably Deep mode set. Set it to new one",
   );
 };
 
@@ -527,7 +538,6 @@ tv.openStrategyTab = async (isDeepTest = false) => {
     }
   }
   let strategyCaptionEl = document.querySelector(SEL.strategyCaption); // 2023-02-24 Changed to more complicated logic - for single and multiple strategies in page
-  // strategyCaptionEl = !strategyCaptionEl ? document.querySelector(SEL.strategyCaptionNew) : strategyCaptionEl // From 2022-11-13
   if (!strategyCaptionEl) {
     // || !strategyCaptionEl.innerText) {
     throw new Error(
@@ -536,7 +546,6 @@ tv.openStrategyTab = async (isDeepTest = false) => {
     );
   }
   await tv.checkIsNewVersion();
-  // let stratSummaryEl = await page.$(SEL.strategyPerformanceTab)
   let stratSummaryEl = await page.waitForSelector(
     SEL.strategyPerformanceTab,
     1000,
@@ -582,7 +591,7 @@ tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
     10000,
   );
   if (!tv.reportNode) {
-    // tv.reportNode = await page.waitForSelector(SEL.strategyReport, 10000)
+    // TODO When user switch to deep backtest or minimize window - it should be deleted and created again. Or delete observer after every test
     tv.reportNode = await page.waitForSelector(
       SEL.strategyReportObserveArea,
       10000,
@@ -591,13 +600,13 @@ tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
       const reportObserver = new MutationObserver(() => {
         tv.isReportChanged = true;
       });
-      console.log("SET DEEP TEST OBSERVE AREA");
       reportObserver.observe(tv.reportNode, {
         childList: true,
         subtree: true,
         attributes: false,
         characterData: false,
       });
+      console.log("[INFO] Observer added to tv.reportNode");
     } else {
       throw new Error("The strategy report did not found." + SUPPORT_TEXT);
     }
@@ -619,8 +628,9 @@ tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
           attributes: false,
           characterData: false,
         });
+        console.log("[INFO] Observer added to tv.reportDeepNode");
       } else {
-        console.error("The strategy deep report did not found.");
+        console.error("[INFO] The strategy deep report did not found.");
       }
     }
   }
