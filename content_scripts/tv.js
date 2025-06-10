@@ -909,6 +909,9 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
     }
   }
 
+  report["myMetric"] =
+    report["Net profit: All"] / report["Max equity drawdown"];
+
   return report;
 };
 
