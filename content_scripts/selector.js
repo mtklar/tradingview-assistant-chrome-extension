@@ -1,5 +1,5 @@
 const selStatus = {
-  isNewVersion: null,
+  isNewVersion: true,
   userDoNotHaveDeepBacktest: null
 }
 
@@ -52,12 +52,19 @@ const SEL = {
   },
   get strategyReportInProcess() {
     return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] div[class^="wrapper"] div[role="progressbar"]' :
+      '[id="snackbar-container"] [data-qa-id^="backtesting-loading-report-snackbar"]' :
       '#bottom-area div[class^="backtesting"] div[class^="widgetContainer"]  div[role="progressbar"]'
   },
   get strategyReportReady() {
     return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1) > div[class^="wrapper"] div[class^="ka root"]' :
+      // '[class="backtesting deep-history"] > div:nth-child(1) > div[class^="wrapper"] div[class^="ka root"]' :
+      '[id="snackbar-container"] [data-qa-id^="backtesting-success-report-snackbar"]' :
+      '#bottom-area div[class^="backtesting"] div[class^="widgetContainer"] div[class^="reportContainer"] [class*="root"]'
+  },
+  get strategyReportUpdate() {
+    return selStatus.isNewVersion ?
+      // '[class="backtesting deep-history"] > div:nth-child(1) > div[class^="wrapper"] div[class^="ka root"]' :
+      '[id="snackbar-container"] [data-qa-id^="backtesting-updated-report-snackbar"] button' :
       '#bottom-area div[class^="backtesting"] div[class^="widgetContainer"] div[class^="reportContainer"] [class*="root"]'
   },
   // strategyReportTransitionReady: '#bottom-area div.backtesting-content-wrapper > div:not(.opacity-transition).reports-content',
@@ -132,6 +139,10 @@ const SEL = {
       '[class="backtesting deep-history"] > div:nth-child(1) div[class^="ka root"] table tbody > tr' :
       '#bottom-area  div[class^="backtesting"] div[class^="backtesting-content-wrapper"] div[class^="reportContainer"] table tbody > tr'
   },
+
+  strategyTabPeriodDD: '[class^="dateRangeMenuWrapper"] button',
+  strategyTabPeriodEntyreHistory: '[class^="eventWrapper"] [role="group"] > div:nth-child(5) > div[aria-checked="true"]',
+
   strategyListOptions: 'div[role="listbox"] div[data-name="menu-inner"] div[role="option"] span[class^="label-"]',
   strategyDefaultElement: '#property-actions',
 
